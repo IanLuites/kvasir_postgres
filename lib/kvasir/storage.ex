@@ -85,8 +85,8 @@ defmodule Kvasir.Storage.Postgres do
       pg,
       """
       INSERT INTO topic_#{topic}
-      (partition, p_offset, id, type, event)
-      VALUES ($1, $2, $3, $4, $5)
+      (partition, p_offset, id, type, event, committed)
+      VALUES ($1, $2, $3, $4, $5, $6)
       ON CONFLICT DO NOTHING;
       """,
       [partition, offset, to_string(id), t.__event__(:type), payload]
@@ -263,7 +263,7 @@ defmodule Kvasir.Storage.Postgres do
         id TEXT NOT NULL,
         type TEXT NOT NULL,
         event BYTEA NOT NULL,
-        date timestamp NOT NULL DEFAULT now(),
+        committed TIMESTAMP NOT NULL,
         PRIMARY KEY (partition, p_offset),
         UNIQUE (pg_offset)
       ); /* PARTITION BY LIST(partition); */
