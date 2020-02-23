@@ -76,7 +76,7 @@ defmodule Kvasir.Storage.Postgres do
   def freeze(
         pg,
         %{topic: topic, module: m, key: key},
-        event = %t{__meta__: %{key: k, partition: partition, offset: offset}}
+        event = %t{__meta__: %{key: k, partition: partition, offset: offset, timestamp: ts}}
       ) do
     {:ok, payload} = m.bin_encode(event)
     {:ok, id} = key.dump(k, [])
@@ -89,7 +89,7 @@ defmodule Kvasir.Storage.Postgres do
       VALUES ($1, $2, $3, $4, $5, $6)
       ON CONFLICT DO NOTHING;
       """,
-      [partition, offset, to_string(id), t.__event__(:type), payload]
+      [partition, offset, to_string(id), t.__event__(:type), payload, UTCDateTime.to_naive(ts)]
     )
 
     Postgrex.query!(
@@ -133,17 +133,18 @@ defmodule Kvasir.Storage.Postgres do
           v
         ).rows,
         fn [a, b, c, d] ->
-          with {:ok, event} <- decoder.bin_decode(d),
+          with {:ok, event = %{__meta__: m}} <- decoder.bin_decode(d),
                {:ok, k} <- key.parse(c, []) do
             {:ok,
              %{
                event
-               | __meta__: %Kvasir.Event.Meta{
-                   key: k,
-                   key_type: key,
-                   topic: topic.topic,
-                   partition: a,
-                   offset: b
+               | __meta__: %{
+                   m
+                   | key: k,
+                     key_type: key,
+                     topic: topic.topic,
+                     partition: a,
+                     offset: b
                  }
              }}
           end
