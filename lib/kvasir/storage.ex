@@ -151,7 +151,7 @@ defmodule Kvasir.Storage.Postgres do
         end
       )
 
-    Logger.debug(fn -> "#{__MODULE__}: Read #{Enum.count(r)}" end)
+    Logger.debug(fn -> "#{inspect(__MODULE__)}[#{inspect(pg)}]: Read #{Enum.count(r)}" end)
 
     {:ok, r}
   end
