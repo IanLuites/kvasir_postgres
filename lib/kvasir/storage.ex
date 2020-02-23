@@ -89,7 +89,7 @@ defmodule Kvasir.Storage.Postgres do
       VALUES ($1, $2, $3, $4, $5)
       ON CONFLICT DO NOTHING;
       """,
-      [partition, offset, id, t.__event__(:type), payload]
+      [partition, offset, to_string(id), t.__event__(:type), payload]
     )
 
     Postgrex.query!(
