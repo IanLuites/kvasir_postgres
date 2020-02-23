@@ -62,7 +62,12 @@ defmodule Kvasir.Postgres.MixProject do
 
   defp deps do
     [
-      {:postgrex, "~> 0.15.1"}
+      {:kvasir, git: "https://github.com/IanLuites/kvasir", branch: "release/v1.0"},
+      {:postgrex, "~> 0.15.1"},
+
+      # Dev / Test
+      {:analyze, "~> 0.1", only: [:dev, :test], runtime: false, override: true},
+      {:dialyxir, "~> 1.0.0-rc.7", only: [:dev], runtime: false}
     ]
   end
 end
