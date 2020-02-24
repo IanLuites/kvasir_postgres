@@ -3,6 +3,7 @@ defmodule Kvasir.Storage.Postgres do
   PostgreSQL Kvasir cold storage.
   """
   alias Kvasir.Offset
+  @big_int_offset 9_223_372_036_854_775_808
   @behaviour Kvasir.Storage
   require Logger
 
@@ -20,7 +21,8 @@ defmodule Kvasir.Storage.Postgres do
              """,
              [topic.topic]
            ) do
-      {:ok, Enum.reduce(rows, offset, fn [p, o], acc -> Offset.set(acc, p, o) end)}
+      {:ok,
+       Enum.reduce(rows, offset, fn [p, o], acc -> Offset.set(acc, p, o + @big_int_offset) end)}
     end
   end
 
@@ -54,7 +56,7 @@ defmodule Kvasir.Storage.Postgres do
   defp contains_reduce([], _, acc), do: acc
 
   defp contains_reduce([[p, min, max] | ps], offsets, acc) do
-    off = offsets[p]
+    off = offsets[p] - @big_int_offset
 
     m =
       cond do
@@ -79,7 +81,7 @@ defmodule Kvasir.Storage.Postgres do
         event = %t{__meta__: %{key: k, partition: partition, offset: offset, timestamp: ts}}
       ) do
     {:ok, payload} = m.bin_encode(event)
-    {:ok, id} = key.dump(k, [])
+    {:ok, id} = id(k, key)
 
     Postgrex.query!(
       pg,
@@ -89,7 +91,14 @@ defmodule Kvasir.Storage.Postgres do
       VALUES ($1, $2, $3, $4, $5, $6)
       ON CONFLICT DO NOTHING;
       """,
-      [partition, offset, to_string(id), t.__event__(:type), payload, UTCDateTime.to_naive(ts)]
+      [
+        partition,
+        offset - @big_int_offset,
+        id,
+        t.__event__(:type),
+        payload,
+        UTCDateTime.to_naive(ts)
+      ]
     )
 
     Postgrex.query!(
@@ -105,7 +114,7 @@ defmodule Kvasir.Storage.Postgres do
       [
         topic,
         partition,
-        offset
+        offset - @big_int_offset
       ]
     )
 
@@ -115,10 +124,18 @@ defmodule Kvasir.Storage.Postgres do
   @impl Kvasir.Storage
   def stream(pg, topic, opts \\ [])
 
-  def stream(pg, topic = %{module: decoder, key: key}, opts) do
+  def stream(pg, topic = %{module: decoder, key: key, partitions: partitions}, opts) do
     events = events(opts[:events])
-    id = opts[:id]
     partition = Keyword.get(opts, :partition)
+
+    id =
+      if i = opts[:id] do
+        {:ok, i} = id(i, key)
+        i
+      end
+
+    partition = if(id, do: key.partition(key, partitions), else: partition)
+
     {q, v} = query(events, id, partition, opts[:from])
 
     r =
@@ -128,13 +145,14 @@ defmodule Kvasir.Storage.Postgres do
           """
           SELECT partition, p_offset, id, event
           FROM topic_#{topic.topic} #{q}
-          ORDER BY pg_offset ASC;
+          ORDER BY committed ASC;
           """,
           v
         ).rows,
         fn [a, b, c, d] ->
           with {:ok, event = %{__meta__: m}} <- decoder.bin_decode(d),
-               {:ok, k} <- key.parse(c, []) do
+               {:ok, ck} <- Jason.decode(c),
+               {:ok, k} <- key.parse(ck, []) do
             {:ok,
              %{
                event
@@ -144,7 +162,7 @@ defmodule Kvasir.Storage.Postgres do
                      key_type: key,
                      topic: topic.topic,
                      partition: a,
-                     offset: b
+                     offset: b + @big_int_offset
                  }
              }}
           end
@@ -176,7 +194,7 @@ defmodule Kvasir.Storage.Postgres do
       |> Enum.map(fn i -> "(partition = $#{i * 2 + 1} AND p_offset >= $#{i * 2 + 2})" end)
       |> Enum.join(" OR ")
 
-    {"WHERE #{q}", Enum.flat_map(offset.partitions, fn {k, v} -> [k, v] end)}
+    {"WHERE #{q}", Enum.flat_map(offset.partitions, fn {k, v} -> [k, v - @big_int_offset] end)}
     # q2 =
     #   (map_size(offset.partitions) * 2 + 1)..(map_size(offset.partitions) * 3)
     #   |> Enum.map(fn i -> "partition != $#{i}" end)
@@ -249,36 +267,38 @@ defmodule Kvasir.Storage.Postgres do
       []
     )
 
-    Enum.each(Map.keys(topics), &initialize_topic(pg, &1))
+    Enum.each(topics, fn {topic, partitions} -> initialize_topic(pg, topic, partitions) end)
   end
 
-  defp initialize_topic(pg, topic) do
+  defp initialize_topic(pg, topic, partitions) do
     Postgrex.query!(
       pg,
       """
       CREATE TABLE IF NOT EXISTS "topic_#{topic}"
       (
-        pg_offset BIGSERIAL NOT NULL,
         partition INTEGER NOT NULL,
         p_offset BIGINT NOT NULL,
         id TEXT NOT NULL,
         type TEXT NOT NULL,
         event BYTEA NOT NULL,
         committed TIMESTAMP NOT NULL,
-        PRIMARY KEY (partition, p_offset),
-        UNIQUE (pg_offset)
-      ); /* PARTITION BY LIST(partition); */
+        PRIMARY KEY (partition, p_offset)
+      ) PARTITION BY HASH(partition);
       """,
       []
     )
 
-    # Postgrex.query!(
-    #   pg,
-    #   """
-    #   CREATE TABLE #{topic}_0 PARTITION OF #{topic} FOR VALUES IN (0);
-    #   """,
-    #   []
-    # )
+    Enum.each(0..(partitions - 1), fn p ->
+      Postgrex.query!(
+        pg,
+        """
+        CREATE TABLE IF NOT EXISTS  "topic_#{topic}_p#{p}" PARTITION OF "topic_#{topic}" FOR VALUES WITH (MODULUS #{
+          partitions
+        }, REMAINDER #{p});
+        """,
+        []
+      )
+    end)
 
     Postgrex.query!(
       pg,
@@ -303,14 +323,6 @@ defmodule Kvasir.Storage.Postgres do
       """,
       []
     )
-
-    Postgrex.query!(
-      pg,
-      """
-      CREATE INDEX IF NOT EXISTS "index_topic_#{topic}_offset" ON "topic_#{topic}"(pg_offset);
-      """,
-      []
-    )
   end
 
   ### Connection ###
@@ -332,5 +344,11 @@ defmodule Kvasir.Storage.Postgres do
       initialize(pid, opts[:initialize] || [])
       {:ok, pid}
     end
+  end
+
+  ### Helpers ###
+
+  def id(key, type) do
+    with {:ok, d} <- type.dump(key), do: Jason.encode(d)
   end
 end
