@@ -135,7 +135,7 @@ defmodule Kvasir.Storage.Postgres do
         i
       end
 
-    partition = if(k, do: key.partition(k, partitions), else: partition)
+    partition = if(k, do: elem(key.partition(k, partitions), 1), else: partition)
 
     {q, v} = query(events, id, partition, opts[:from])
 
