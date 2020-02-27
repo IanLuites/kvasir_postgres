@@ -187,6 +187,13 @@ defmodule Kvasir.Storage.Postgres do
   defp query([event], nil, nil, nil), do: {"WHERE type LIKE $1", [event]}
   defp query(events, nil, nil, nil) when is_list(events), do: {"WHERE type in $1", [events]}
   defp query(nil, id, nil, nil), do: {"WHERE id = $1", [id]}
+  defp query(nil, id, partition, nil), do: {"WHERE partition = $1 AND id = $2", [partition, id]}
+
+  defp query(nil, id, partition, offset),
+    do:
+      {"WHERE partition = $1 AND id = $2 AND p_offset >= $3",
+       [partition, id, offset.partitions[partition] - @big_int_offset]}
+
   defp query(_, _, _, nil), do: {"", []}
 
   defp query(_type, nil, _partition, offset) do
