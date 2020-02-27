@@ -126,15 +126,16 @@ defmodule Kvasir.Storage.Postgres do
 
   def stream(pg, topic = %{module: decoder, key: key, partitions: partitions}, opts) do
     events = events(opts[:events])
+    k = opts[:key] || opts[:id]
     partition = Keyword.get(opts, :partition)
 
     id =
-      if i = opts[:id] do
-        {:ok, i} = id(i, key)
+      if k do
+        {:ok, i} = id(k, key)
         i
       end
 
-    partition = if(id, do: key.partition(key, partitions), else: partition)
+    partition = if(k, do: key.partition(k, partitions), else: partition)
 
     {q, v} = query(events, id, partition, opts[:from])
 
@@ -152,13 +153,13 @@ defmodule Kvasir.Storage.Postgres do
         fn [a, b, c, d] ->
           with {:ok, event = %{__meta__: m}} <- decoder.bin_decode(d),
                {:ok, ck} <- Jason.decode(c),
-               {:ok, k} <- key.parse(ck, []) do
+               {:ok, pk} <- key.parse(ck, []) do
             {:ok,
              %{
                event
                | __meta__: %{
                    m
-                   | key: k,
+                   | key: pk,
                      key_type: key,
                      topic: topic.topic,
                      partition: a,
