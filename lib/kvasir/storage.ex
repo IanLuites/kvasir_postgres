@@ -189,10 +189,19 @@ defmodule Kvasir.Storage.Postgres do
   defp query(nil, id, nil, nil), do: {"WHERE id = $1", [id]}
   defp query(nil, id, partition, nil), do: {"WHERE partition = $1 AND id = $2", [partition, id]}
 
+  defp query(_type, nil, _partition, offset = %{}) do
+    q =
+      0..(map_size(offset.partitions) - 1)
+      |> Enum.map(fn i -> "(partition = $#{i * 2 + 1} AND p_offset >= $#{i * 2 + 2})" end)
+      |> Enum.join(" OR ")
+
+    {"WHERE #{q}", Enum.flat_map(offset.partitions, fn {k, v} -> [k, v - @big_int_offset] end)}
+  end
+
   defp query(nil, id, partition, offset),
     do:
       {"WHERE partition = $1 AND id = $2 AND p_offset >= $3",
-       [partition, id, offset.partitions[partition] - @big_int_offset]}
+       [partition, id, (offset.partitions[partition] || 0) - @big_int_offset]}
 
   defp query(_, _, _, nil), do: {"", []}
 
