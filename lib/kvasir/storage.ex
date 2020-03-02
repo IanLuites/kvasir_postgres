@@ -357,8 +357,13 @@ defmodule Kvasir.Storage.Postgres do
   @doc false
   @spec start_link(atom, Keyword.t()) :: {:ok, pid} | {:error, term}
   def start_link(name, opts) do
-    with {:ok, pid} <- Postgrex.start_link([{:name, name} | settings(opts)]) do
-      initialize(pid, opts[:initialize] || [])
+    init = opts[:initialize] || []
+    max_pool = opts[:max_pool] || 15
+    pool_size = init |> Enum.map(&elem(&1, 1)) |> Enum.sum() |> min(max_pool)
+
+    with {:ok, pid} <-
+           Postgrex.start_link([{:name, name}, {:pool_size, pool_size} | settings(opts)]) do
+      initialize(pid, init)
       {:ok, pid}
     end
   end
