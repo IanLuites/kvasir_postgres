@@ -361,8 +361,15 @@ defmodule Kvasir.Storage.Postgres do
     max_pool = opts[:max_pool] || 15
     pool_size = init |> Enum.map(&elem(&1, 1)) |> Enum.sum() |> min(max_pool)
 
-    with {:ok, pid} <-
-           Postgrex.start_link([{:name, name}, {:pool_size, pool_size} | settings(opts)]) do
+    settings = [
+      {:name, name},
+      {:pool_size, pool_size},
+      {:queue_target, opts[:queue_target] || 100},
+      {:queue_interval, opts[:queue_interval] || 1_000}
+      | settings(opts)
+    ]
+
+    with {:ok, pid} <- Postgrex.start_link(settings) do
       initialize(pid, init)
       {:ok, pid}
     end
