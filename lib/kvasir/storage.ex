@@ -86,7 +86,7 @@ defmodule Kvasir.Storage.Postgres do
     Postgrex.query!(
       pg,
       """
-      INSERT INTO topic_#{topic}
+      INSERT INTO "topic_#{topic}"
       (partition, p_offset, id, type, event, committed)
       VALUES ($1, $2, $3, $4, $5, $6)
       ON CONFLICT DO NOTHING;
@@ -145,7 +145,7 @@ defmodule Kvasir.Storage.Postgres do
           pg,
           """
           SELECT partition, p_offset, id, event
-          FROM topic_#{topic.topic} #{q}
+          FROM "topic_#{topic.topic}" #{q}
           ORDER BY committed ASC;
           """,
           v
@@ -287,7 +287,7 @@ defmodule Kvasir.Storage.Postgres do
     Enum.each(topics, fn {topic, partitions} -> initialize_topic(pg, topic, partitions) end)
   end
 
-  defp initialize_topic(pg, topic, partitions) do
+  def initialize_topic(pg, topic, partitions) do
     Postgrex.query!(
       pg,
       """
